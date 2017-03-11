@@ -11,10 +11,15 @@ import (
 
 // Client ...
 type Client struct {
-	PrintDebugMsg bool
-	client        net.Conn     // 用户客户端
-	onData        func([]byte) // 收到命令行回调
-	onClose       func()       // 链接断开回调
+	PrintDebugMsg  bool
+	client         net.Conn     // 用户客户端
+	onData         func([]byte) // 收到命令行回调
+	onClose        func()       // 链接断开回调
+	status         int          // 状态：0=未连接／1=已连接
+	serverAddr     string       // 服务器地址
+	reconnect      bool         // 断线重连
+	connectTimeout int          // 连线超时时间（秒）
+	reconnectWait  int          // 重连时间间隔（秒）
 }
 
 // NewClient 创建客户端
@@ -23,17 +28,39 @@ func NewClient(onData func([]byte), onClose func()) *Client {
 }
 
 // Connect 连接到服务器
-func (o *Client) Connect(address string) error {
-	var err error
-	if o.client, err = net.DialTimeout("tcp", address, time.Second*5); err != nil {
-		return err
+func (o *Client) Connect(address string, reconnect bool, connectTimeout int, reconnectWait int) error {
+	defer func() { recover() }()
+	o.serverAddr = address
+	o.reconnect = reconnect
+	o.connectTimeout = connectTimeout
+	o.reconnectWait = reconnectWait
+
+	return o.reConnect()
+}
+
+func (o *Client) reConnect() error {
+	defer func() { recover() }()
+
+	for {
+		var err error
+		o.client, err = net.DialTimeout("tcp", o.serverAddr, time.Second*time.Duration(o.connectTimeout))
+		if err == nil {
+			break
+		}
+		if !o.reconnect {
+			return err
+		}
+		// log.Println("reconnect...", o.serverAddr, err)
+		time.Sleep(time.Second * time.Duration(o.reconnectWait))
 	}
+	o.status = 1
 	go o.hClient()
 	return nil
 }
 
 // 监听数据
 func (o *Client) hClient() {
+	defer func() { recover() }()
 	if o.PrintDebugMsg {
 		log.Printf("Connect server %v -> %v \n", o.client.LocalAddr(), o.client.RemoteAddr())
 	}
@@ -80,6 +107,10 @@ func (o *Client) hClient() {
 			}
 		}
 	}
+	o.status = 0
+	if o.reconnect {
+		o.reConnect()
+	}
 	if o.onClose != nil {
 		o.onClose()
 	}
@@ -90,6 +121,10 @@ func (o *Client) hClient() {
 
 // Send 向服务器发送数据
 func (o *Client) Send(x []byte) int {
+	if o.status == 0 {
+		return 0
+	}
+	defer func() { recover() }()
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.LittleEndian, uint32(len(x)+0x4))
 	buf.Write(x)
@@ -97,10 +132,14 @@ func (o *Client) Send(x []byte) int {
 	if o.PrintDebugMsg {
 		log.Print("Send:", n, "\n", hex.Dump(buf.Bytes()))
 	}
-	return n - 4
+	if n >= 4 {
+		return n - 4
+	}
+	return n
 }
 
 // Close 关闭链接
 func (o *Client) Close() {
+	defer func() { recover() }()
 	o.client.Close()
 }

@@ -23,12 +23,15 @@ func main() {
 	s.StartServer("0.0.0.0:1234")
 
 	c = NewClient(onClientData, onClientClose)
-	if err := c.Connect("0.0.0.0:1234"); err != nil {
+	if err := c.Connect("0.0.0.0:1234", true, 5, 5); err != nil {
 		log.Fatalln("[C] connect error:", err)
 	}
-	c.Send([]byte("c" + testData))
+	if 0 == c.Send([]byte("c"+testData)) {
+		log.Fatalln("[C] send error:0")
+	}
 
 	<-ch
+	// time.Sleep(time.Second * 10)
 }
 
 func onServerData(conn net.Conn, data []byte) {

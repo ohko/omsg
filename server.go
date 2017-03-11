@@ -27,6 +27,7 @@ func NewServer(onData func(net.Conn, []byte), onNewClient func(net.Conn), onClos
 
 // StartServer 启动服务
 func (o *Server) StartServer(laddr string) error {
+	defer func() { recover() }()
 	var err error
 	if o.server, err = net.Listen("tcp", laddr); err != nil {
 		return err
@@ -37,6 +38,7 @@ func (o *Server) StartServer(laddr string) error {
 
 // 监听端口
 func (o *Server) hListener(s net.Listener) {
+	defer func() { recover() }()
 	for {
 		conn, err := s.Accept()
 		if o.PrintDebugMsg {
@@ -54,6 +56,7 @@ func (o *Server) hListener(s net.Listener) {
 
 // 接收数据
 func (o *Server) hServer(conn net.Conn) {
+	defer func() { recover() }()
 	// 记录客户端
 	o.lock.Lock()
 	o.clientList = append(o.clientList, conn)
@@ -137,6 +140,7 @@ func (o *Server) hServer(conn net.Conn) {
 
 // SendToAll 向所有客户端发送数据
 func (o *Server) SendToAll(x []byte) {
+	defer func() { recover() }()
 	o.lock.Lock()
 	defer o.lock.Unlock()
 	for _, v := range o.clientList {
@@ -151,6 +155,7 @@ func (o *Server) GetClients() []net.Conn {
 
 // Send 向指定客户端发送数据
 func (o *Server) Send(c net.Conn, x []byte) int {
+	defer func() { recover() }()
 	// 增加数据头，指定数据尺寸
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.LittleEndian, uint32(len(x)+0x4))
@@ -159,15 +164,20 @@ func (o *Server) Send(c net.Conn, x []byte) int {
 	if o.PrintDebugMsg {
 		log.Print("Send:", n, "\n", hex.Dump(buf.Bytes()))
 	}
-	return n - 4
+	if n >= 4 {
+		return n - 4
+	}
+	return n
 }
 
 // GetClientTotal 获取客户端数量
 func (o *Server) GetClientTotal() int {
+	defer func() { recover() }()
 	return len(o.clientList)
 }
 
 // Close 关闭服务器
 func (o *Server) Close() {
+	defer func() { recover() }()
 	o.server.Close()
 }

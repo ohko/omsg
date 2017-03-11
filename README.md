@@ -27,7 +27,7 @@ func onServerClose(conn net.Conn) {
 # Client
 ```
 c = NewClient(onClientData, onClientClose)
-if err := c.Connect("0.0.0.0:1234"); err != nil {
+if err := c.Connect("0.0.0.0:1234", true, 5, 5); err != nil {
     log.Fatalln("[C] connect error:", err)
 }
 c.Send([]byte("hello"))
