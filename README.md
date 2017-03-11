@@ -1,5 +1,10 @@
 # omsg
-简单的TCP通讯，解决拆包和粘包的问题。
+通过TCP建立连接通讯，解决拆包和粘包的问题。
+
+# 使用
+```
+$ go get -u github.com/ohko/omsg
+```
 
 # Server
 ```
