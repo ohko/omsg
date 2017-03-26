@@ -113,7 +113,10 @@ func (o *Server) hServer(conn net.Conn) {
 
 			// 数据回调
 			if o.onData != nil {
-				o.onData(conn, cache.Next(needLen))
+				// o.onData(conn, cache.Next(needLen))
+				_tmp := make([]byte, needLen)
+				copy(_tmp, cache.Next(needLen))
+				go o.onData(conn, _tmp)
 				needLen = 0
 			}
 		}

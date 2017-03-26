@@ -102,7 +102,10 @@ func (o *Client) hClient() {
 
 			// 数据回调
 			if o.onData != nil {
-				o.onData(cache.Next(needLen))
+				// o.onData(cache.Next(needLen))
+				_tmp := make([]byte, needLen)
+				copy(_tmp, cache.Next(needLen))
+				go o.onData(_tmp)
 				needLen = 0
 			}
 		}

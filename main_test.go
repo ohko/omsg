@@ -17,22 +17,30 @@ var ch chan bool
 var ai int64
 var si int64
 var ci int64
-var data string
+var dd string
 
 const testData = "testData"
 
 // Test ...
 func Test(t *testing.T) {
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	data = strings.Join(make([]string, 100*10000), ".")
+	dd = strings.Join(make([]string, 1000*10000), ".")
+
+	// go tool pprof xx cpu-profile.prof
+	// f, err := os.Create("cpu-profile.prof")
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+	// pprof.StartCPUProfile(f)
 	main()
+	// pprof.StopCPUProfile()
 }
 
 // 测试方案：并发发送0～100x1000，判断服务器收到的数据之和是否是预料值。
 func main() {
 	ch = make(chan bool)
-	x := 100
-	y := 100
+	x := 1
+	y := 100000
 	for i := 1; i <= x; i++ {
 		for j := 1; j <= y; j++ {
 			ai += int64(i * j)
@@ -49,20 +57,20 @@ func main() {
 		if err := c.Connect("0.0.0.0:1234", true, 5, 5); err != nil {
 			log.Fatalln("[C] connect error:", err)
 		}
-		for j := 1; j <= y; j++ {
-			if 0 == c.Send([]byte(fmt.Sprintf("%v,", i*j)+data[:i*j])) {
-				log.Fatalln("[C] send error:0")
+		go func(i int) {
+			for j := 1; j <= y; j++ {
+				c.Send([]byte(fmt.Sprintf("%v,", i*j) + dd[:i*j]))
 			}
-		}
+		}(i)
 	}
 
 	<-ch
-	if ai != si || ai != ci {
-		log.Fatalln("测试失败")
-	}
 	fmt.Println("ai:", ai)
 	fmt.Println("si:", si)
 	fmt.Println("ci:", ci)
+	if ai != si || ai != ci {
+		log.Fatalln("测试失败")
+	}
 }
 
 func onServerData(conn net.Conn, data []byte) {
@@ -72,8 +80,7 @@ func onServerData(conn net.Conn, data []byte) {
 		log.Fatalln("[S] recv len err:", n, len(da[1]))
 	}
 	atomic.AddInt64(&si, int64(n))
-	s.Send(conn, data)
-	// conn.Close()
+	s.Send(conn, []byte(fmt.Sprintf("%v,", n)+dd[:n]))
 }
 
 func onNewClient(conn net.Conn) {
@@ -91,7 +98,6 @@ func onClientData(data []byte) {
 		log.Fatalln("[C] recv len err:", n, len(da[1]))
 	}
 	atomic.AddInt64(&ci, int64(n))
-	// c.Close()
 	if ci == ai {
 		ch <- true
 	}
