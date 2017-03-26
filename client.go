@@ -50,7 +50,7 @@ func (o *Client) reConnect() error {
 		if !o.reconnect {
 			return err
 		}
-		// log.Println("reconnect...", o.serverAddr, err)
+		log.Println("reconnect...", o.serverAddr, err)
 		time.Sleep(time.Second * time.Duration(o.reconnectWait))
 	}
 	o.status = 1
