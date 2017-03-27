@@ -39,8 +39,8 @@ func Test(t *testing.T) {
 // 测试方案：并发发送0～100x1000，判断服务器收到的数据之和是否是预料值。
 func main() {
 	ch = make(chan bool)
-	x := 1
-	y := 100000
+	x := 100
+	y := 100
 	for i := 1; i <= x; i++ {
 		for j := 1; j <= y; j++ {
 			ai += int64(i * j)
