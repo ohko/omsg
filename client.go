@@ -102,15 +102,15 @@ func (o *Client) hClient() {
 
 			// 数据回调
 			if o.onData != nil {
-				// o.onData(cache.Next(needLen))
-				_tmp := make([]byte, needLen)
-				copy(_tmp, cache.Next(needLen))
-				go o.onData(_tmp)
-				needLen = 0
+				o.onData(cache.Next(needLen))
+			} else {
+				cache.Next(needLen)
 			}
+			needLen = 0
 		}
 	}
 	o.status = 0
+	o.client.Close()
 	if o.reconnect {
 		o.reConnect()
 	}

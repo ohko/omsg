@@ -16,13 +16,21 @@ type Server struct {
 	onData        func(net.Conn, []byte) // 数据回调
 	onNewClient   func(net.Conn)         // 新客户端回调
 	onClose       func(net.Conn)         // 客户端断开回调
-	clientList    []net.Conn             // 客户端列表
+	clientList    map[net.Conn]*client   // 客户端列表
 	lock          sync.Mutex
+}
+
+type client struct {
+	conn   net.Conn // 客户端连接
+	verify bool     // 是否授权
 }
 
 // NewServer 创建
 func NewServer(onData func(net.Conn, []byte), onNewClient func(net.Conn), onClose func(net.Conn)) *Server {
-	return &Server{onData: onData, onNewClient: onNewClient, onClose: onClose}
+	return &Server{
+		onData: onData, onNewClient: onNewClient, onClose: onClose,
+		clientList: make(map[net.Conn]*client),
+	}
 }
 
 // StartServer 启动服务
@@ -57,16 +65,17 @@ func (o *Server) hListener(s net.Listener) {
 // 接收数据
 func (o *Server) hServer(conn net.Conn) {
 	defer func() { recover() }()
+	defer conn.Close()
+
 	// 记录客户端
 	o.lock.Lock()
-	o.clientList = append(o.clientList, conn)
+	o.clientList[conn] = &client{conn: conn, verify: false}
 	o.lock.Unlock()
 
 	// 新客户端回调
 	if o.onNewClient != nil {
 		o.onNewClient(conn)
 	}
-	defer conn.Close()
 
 	// 接受数据缓存
 	cache := new(bytes.Buffer)
@@ -113,12 +122,11 @@ func (o *Server) hServer(conn net.Conn) {
 
 			// 数据回调
 			if o.onData != nil {
-				// o.onData(conn, cache.Next(needLen))
-				_tmp := make([]byte, needLen)
-				copy(_tmp, cache.Next(needLen))
-				go o.onData(conn, _tmp)
-				needLen = 0
+				o.onData(conn, cache.Next(needLen))
+			} else {
+				cache.Next(needLen)
 			}
+			needLen = 0
 		}
 	}
 
@@ -129,12 +137,7 @@ func (o *Server) hServer(conn net.Conn) {
 
 	// 从客户端列表移除
 	o.lock.Lock()
-	for k, v := range o.clientList {
-		if v == conn {
-			o.clientList = append(o.clientList[:k], o.clientList[k+1:]...)
-			break
-		}
-	}
+	delete(o.clientList, conn)
 	o.lock.Unlock()
 	if o.PrintDebugMsg {
 		log.Printf("Client exit %v x %v \n", conn.LocalAddr(), conn.RemoteAddr())
@@ -147,13 +150,8 @@ func (o *Server) SendToAll(x []byte) {
 	o.lock.Lock()
 	defer o.lock.Unlock()
 	for _, v := range o.clientList {
-		o.Send(v, x)
+		o.Send(v.conn, x)
 	}
-}
-
-// GetClients 获取所有客户端
-func (o *Server) GetClients() []net.Conn {
-	return o.clientList
 }
 
 // Send 向指定客户端发送数据
