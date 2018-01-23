@@ -1,8 +1,6 @@
 package omsg
 
 import (
-	"bytes"
-	"encoding/binary"
 	"net"
 	"sync"
 	"time"
@@ -67,50 +65,7 @@ func (o *Server) hServer(conn net.Conn) {
 		o.onNewClient(conn)
 	}
 
-	// 接受数据缓存
-	cache := new(bytes.Buffer)
-	buf := make([]byte, 0x100)
-	var recvLen int
-	var err error
-	var needLen int
-
-	// 接受数据
-	for {
-		if recvLen, err = conn.Read(buf); err != nil {
-			break
-		}
-
-		// 写入缓存
-		cache.Write(buf[:recvLen])
-
-		for {
-			// 读取数据长度
-			if needLen == 0 {
-				// 头4字节是数据长度
-				if cache.Len() < 8 {
-					break
-				}
-
-				needLen = int(binary.LittleEndian.Uint32(cache.Next(4))) - 4
-			}
-
-			// 数据长度不够，继续读取
-			if needLen > cache.Len() {
-				break
-			}
-
-			// 数据回调
-			if o.onData != nil {
-				tmp := cache.Next(needLen)
-				originLen := int(binary.LittleEndian.Uint32(tmp))
-				o.crypt.Decrypt(tmp[4:])
-				o.onData(conn, tmp[4:4+originLen])
-			} else {
-				cache.Next(needLen)
-			}
-			needLen = 0
-		}
-	}
+	recv(o.crypt, conn, o.onData, nil)
 
 	// 断线
 	if o.onClose != nil {
@@ -134,27 +89,7 @@ func (o *Server) SendToAll(x []byte) {
 
 // Send 向指定客户端发送数据
 func (o *Server) Send(c net.Conn, data []byte) (int, error) {
-	var buf [8]byte
-	sizeOld := len(data)
-	sizeNew := sizeOld
-	if len(data)%16 != 0 {
-		sizeNew += 16 - (len(data) % 16)
-	}
-	// 数据大小
-	binary.LittleEndian.PutUint32(buf[:], uint32(sizeNew+0x8))
-	// 原数据大小
-	binary.LittleEndian.PutUint32(buf[4:], uint32(sizeOld))
-
-	if n, err := c.Write(buf[:]); err != nil {
-		return n, err
-	}
-
-	if sizeNew != sizeOld {
-		data = append(data, bytes.Repeat([]byte("0"), sizeNew-sizeOld)...)
-	}
-	o.crypt.Encrypt(data)
-
-	return c.Write(data)
+	return send(o.crypt, c, data)
 }
 
 // Close 关闭服务器
