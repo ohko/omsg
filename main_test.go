@@ -6,104 +6,94 @@ import (
 	"log"
 	"net"
 	"runtime"
-	"strconv"
-	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 var s *Server
-var ch chan bool
-var ai int64
-var si int64
-var ci int64
-var iCli = 100
-var iTh = 100
-
-// Test ...
-func Test(t *testing.T) {
-	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	// go tool pprof xx cpu-profile.prof
-	// f, err := os.Create("cpu-profile.prof")
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	// pprof.StartCPUProfile(f)
-	main()
-	// pprof.StopCPUProfile()
-}
+var nServerClient int64    // 成功连入的client数量
+var nServerDataCount int64 // 服务器收到数据数量
+var nServerClosed int64    // 成功断开的客户端数量
+var nServerDataLen int64   // 服务器收到数据总大小
+var nClientDataLen int64   // 客户端收到数据总大小
 
 // 测试方案：并发发送0～100x1000，判断服务器收到的数据之和是否是预料值。
-func main() {
-	ch = make(chan bool)
-	x := iCli
-	y := iTh
+func Test(t *testing.T) {
+	log.SetFlags(log.Flags() | log.Lshortfile)
+	runtime.GOMAXPROCS(runtime.NumCPU())
+
+	x := 100 // client数量
+	y := 100 // 每个client发送多少次数据
+	var nNeed int64
 	for i := 1; i <= x; i++ {
 		for j := 1; j <= y; j++ {
-			ai += int64(i * j)
+			nNeed += int64(j)
 		}
 	}
 
-	// 创建N个客户端
+	// 创建多个client
 	for i := 1; i <= x; i++ {
 		go func(i int) {
-			c := NewClient(onClientData, onClientClose)
-			if err := c.Connect("0.0.0.0:1234", true, 1, 1); err != nil {
+			c := NewClient(
+				func(data []byte) { // 收到服务器数据
+					atomic.AddInt64(&nClientDataLen, int64(len(data)))
+				},
+				func() { // 服务器断开通知
+					// ...
+				},
+				func() { // 重连通知
+					// ...
+				},
+			)
+			if err := c.Connect("0.0.0.0:1234", true, time.Second, time.Second); err != nil {
 				log.Fatalln("[C] connect error:", err)
 			}
-			go func(i int) {
+			go func() { // client多线程并发数据
 				for j := 1; j <= y; j++ {
-					dd := strings.Repeat(".", i*j)
-					c.Send([]byte(fmt.Sprintf("%v,", i*j) + dd))
+					dd := bytes.Repeat([]byte("."), j)
+					c.Send(dd)
 				}
-			}(i)
+				for {
+					time.Sleep(time.Second)
+					if nClientDataLen == nNeed {
+						break
+					}
+				}
+				c.Close()
+			}()
 		}(i)
 	}
 
-	// 创建一个服务器
-	s := NewServer(onServerData, onNewClient, onServerClose)
+	// 创建服务器
+	s := NewServer(
+		func(conn net.Conn, data []byte) { // 收到客户端数据
+			atomic.AddInt64(&nServerDataCount, 1)
+			atomic.AddInt64(&nServerDataLen, int64(len(data)))
+			s.Send(conn, data)
+		},
+		func(conn net.Conn) { // 新客户端通知
+			atomic.AddInt64(&nServerClient, 1)
+		},
+		func(conn net.Conn) { // 客户端断开通知
+			atomic.AddInt64(&nServerClosed, 1)
+		},
+	)
 	s.StartServer("0.0.0.0:1234")
 
-	<-ch
-	fmt.Println("ai:", ai)
-	fmt.Println("si:", si)
-	fmt.Println("ci:", ci)
-	if ai != si || ai != ci {
-		log.Fatalln("测试失败")
+	for {
+		time.Sleep(time.Second)
+		if nServerDataLen == nClientDataLen {
+			break
+		}
+		fmt.Println(".")
 	}
-}
 
-func onServerData(conn net.Conn, data []byte) {
-	da := bytes.Split(data, []byte(","))
-	n, _ := strconv.Atoi(string(da[0]))
-	if n != len(da[1]) {
-		log.Fatalln("[S] recv len err:", n, len(da[1]))
-	}
-	atomic.AddInt64(&si, int64(n))
-	s.Send(conn, data)
-}
+	// 等待客户端断开
+	time.Sleep(time.Second * 2)
 
-func onNewClient(conn net.Conn) {
-	// log.Println("[S] new client:", conn.RemoteAddr(), " new client.")
-}
-
-func onServerClose(conn net.Conn) {
-	log.Println("[S]", conn.RemoteAddr(), " closed.")
-}
-
-func onClientData(data []byte) {
-	da := bytes.Split(data, []byte(","))
-	n, _ := strconv.Atoi(string(da[0]))
-	if n != len(da[1]) {
-		log.Fatalln("[C] recv len err:", n, len(da[1]))
-	}
-	atomic.AddInt64(&ci, int64(n))
-	if ci == ai {
-		ch <- true
-	}
-}
-
-func onClientClose() {
-	log.Println("[C] closed!")
+	fmt.Println("预想数据:", nNeed)
+	fmt.Println("客户端发送:", nClientDataLen)
+	fmt.Println("服务器收到:", nServerDataLen)
+	fmt.Println("成功断开:", nServerClosed)
 }
