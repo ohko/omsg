@@ -16,6 +16,7 @@ type Server struct {
 	onClose     func(net.Conn)         // 客户端断开回调
 	ClientList  map[net.Conn]*SClient  // 客户端列表
 	lock        sync.Mutex
+	crypt       *crypt
 }
 
 // SClient 服务器客户端对象
@@ -25,10 +26,11 @@ type SClient struct {
 }
 
 // NewServer 创建
-func NewServer(onData func(net.Conn, []byte), onNewClient func(net.Conn), onClose func(net.Conn)) *Server {
+func NewServer(key []byte, onData func(net.Conn, []byte), onNewClient func(net.Conn), onClose func(net.Conn)) *Server {
 	return &Server{
 		onData: onData, onNewClient: onNewClient, onClose: onClose,
 		ClientList: make(map[net.Conn]*SClient),
+		crypt:      newCrypt(key),
 	}
 }
 
@@ -85,7 +87,7 @@ func (o *Server) hServer(conn net.Conn) {
 			// 读取数据长度
 			if needLen == 0 {
 				// 头4字节是数据长度
-				if cache.Len() < 4 {
+				if cache.Len() < 8 {
 					break
 				}
 
@@ -99,7 +101,10 @@ func (o *Server) hServer(conn net.Conn) {
 
 			// 数据回调
 			if o.onData != nil {
-				o.onData(conn, cache.Next(needLen))
+				tmp := cache.Next(needLen)
+				originLen := int(binary.LittleEndian.Uint32(tmp))
+				o.crypt.Decrypt(tmp[4:])
+				o.onData(conn, tmp[4:4+originLen])
 			} else {
 				cache.Next(needLen)
 			}
@@ -128,16 +133,28 @@ func (o *Server) SendToAll(x []byte) {
 }
 
 // Send 向指定客户端发送数据
-func (o *Server) Send(c net.Conn, x []byte) (int, error) {
-	// 增加数据头，指定数据尺寸
-	var buf [4]byte
-	binary.LittleEndian.PutUint32(buf[:], uint32(len(x)+0x4))
+func (o *Server) Send(c net.Conn, data []byte) (int, error) {
+	var buf [8]byte
+	sizeOld := len(data)
+	sizeNew := sizeOld
+	if len(data)%16 != 0 {
+		sizeNew += 16 - (len(data) % 16)
+	}
+	// 数据大小
+	binary.LittleEndian.PutUint32(buf[:], uint32(sizeNew+0x8))
+	// 原数据大小
+	binary.LittleEndian.PutUint32(buf[4:], uint32(sizeOld))
 
 	if n, err := c.Write(buf[:]); err != nil {
 		return n, err
 	}
 
-	return c.Write(x)
+	if sizeNew != sizeOld {
+		data = append(data, bytes.Repeat([]byte("0"), sizeNew-sizeOld)...)
+	}
+	o.crypt.Encrypt(data)
+
+	return c.Write(data)
 }
 
 // Close 关闭服务器

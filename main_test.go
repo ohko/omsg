@@ -23,8 +23,9 @@ func Test(t *testing.T) {
 	log.SetFlags(log.Flags() | log.Lshortfile)
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	x := 100 // client数量
-	y := 100 // 每个client发送多少次数据
+	x := 1  // client数量
+	y := 10 // 每个client发送多少次数据
+	key := []byte("1234567812345678")
 	var nNeed int64
 	for i := 1; i <= x; i++ {
 		for j := 1; j <= y; j++ {
@@ -35,7 +36,7 @@ func Test(t *testing.T) {
 	// 创建多个client
 	for i := 1; i <= x; i++ {
 		go func(i int) {
-			c := NewClient(
+			c := NewClient(key,
 				func(data []byte) { // 收到服务器数据
 					atomic.AddInt64(&nClientDataLen, int64(len(data)))
 				},
@@ -66,8 +67,9 @@ func Test(t *testing.T) {
 	}
 
 	// 创建服务器
-	s := NewServer(
+	s = NewServer(key,
 		func(conn net.Conn, data []byte) { // 收到客户端数据
+			// fmt.Println(hex.Dump(data))
 			atomic.AddInt64(&nServerDataCount, 1)
 			atomic.AddInt64(&nServerDataLen, int64(len(data)))
 			s.Send(conn, data)

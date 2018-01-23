@@ -17,11 +17,12 @@ type Client struct {
 	reconnect      bool          // 断线重连
 	connectTimeout time.Duration // 连线超时时间（秒）
 	reconnectWait  time.Duration // 重连时间间隔（秒）
+	crypt          *crypt
 }
 
 // NewClient 创建客户端
-func NewClient(onData func([]byte), onClose func(), onReconnect func()) *Client {
-	return &Client{onData: onData, onClose: onClose}
+func NewClient(key []byte, onData func([]byte), onClose func(), onReconnect func()) *Client {
+	return &Client{onData: onData, onClose: onClose, crypt: newCrypt(key)}
 }
 
 // Connect 连接到服务器
@@ -73,7 +74,7 @@ func (o *Client) hClient() {
 			// 读取数据长度
 			if needLen == 0 {
 				// 头4字节是数据长度
-				if cache.Len() < 4 {
+				if cache.Len() < 8 {
 					break
 				}
 
@@ -87,7 +88,10 @@ func (o *Client) hClient() {
 
 			// 数据回调
 			if o.onData != nil {
-				o.onData(cache.Next(needLen))
+				tmp := cache.Next(needLen)
+				originLen := int(binary.LittleEndian.Uint32(tmp))
+				o.crypt.Decrypt(tmp[4:])
+				o.onData(tmp[4 : 4+originLen])
 			} else {
 				cache.Next(needLen)
 			}
@@ -104,13 +108,28 @@ func (o *Client) hClient() {
 }
 
 // Send 向服务器发送数据
-func (o *Client) Send(x []byte) (int, error) {
-	var buf [4]byte
-	binary.LittleEndian.PutUint32(buf[:], uint32(len(x)+0x4))
+func (o *Client) Send(data []byte) (int, error) {
+	var buf [8]byte
+	sizeOld := len(data)
+	sizeNew := sizeOld
+	if len(data)%16 != 0 {
+		sizeNew += 16 - (len(data) % 16)
+	}
+	// 数据大小
+	binary.LittleEndian.PutUint32(buf[:], uint32(sizeNew+0x8))
+	// 原数据大小
+	binary.LittleEndian.PutUint32(buf[4:], uint32(sizeOld))
+
 	if n, err := o.client.Write(buf[:]); err != nil {
 		return n, err
 	}
-	return o.client.Write(x)
+
+	if sizeNew != sizeOld {
+		data = append(data, bytes.Repeat([]byte("0"), sizeNew-sizeOld)...)
+	}
+	o.crypt.Encrypt(data)
+
+	return o.client.Write(data)
 }
 
 // Close 关闭链接
