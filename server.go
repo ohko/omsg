@@ -8,13 +8,13 @@ import (
 
 // Server 服务器
 type Server struct {
-	server      net.Listener                   // 用于服务器
-	onData      func(net.Conn, uint32, []byte) // 数据回调
-	onNewClient func(net.Conn)                 // 新客户端回调
-	onClose     func(net.Conn)                 // 客户端断开回调
-	ClientList  map[net.Conn]*SClient          // 客户端列表
-	lock        sync.Mutex
-	crypt       *crypt
+	server        net.Listener                              // 用于服务器
+	onData        func(c net.Conn, cmd uint32, data []byte) // 数据回调
+	onNewClient   func(c net.Conn)                          // 新客户端回调
+	onClientClose func(c net.Conn)                          // 客户端断开回调
+	ClientList    map[net.Conn]*SClient                     // 客户端列表
+	lock          sync.Mutex
+	crypt         *crypt
 }
 
 // SClient 服务器客户端对象
@@ -24,9 +24,9 @@ type SClient struct {
 }
 
 // NewServer 创建
-func NewServer(key []byte, onData func(net.Conn, uint32, []byte), onNewClient func(net.Conn), onClose func(net.Conn)) *Server {
+func NewServer(key []byte, onData func(c net.Conn, cmd uint32, data []byte), onNewClient func(c net.Conn), onClientClose func(c net.Conn)) *Server {
 	o := &Server{
-		onData: onData, onNewClient: onNewClient, onClose: onClose,
+		onData: onData, onNewClient: onNewClient, onClientClose: onClientClose,
 		ClientList: make(map[net.Conn]*SClient),
 	}
 	if key != nil {
@@ -41,7 +41,7 @@ func (o *Server) StartServer(laddr string) error {
 	if o.server, err = net.Listen("tcp", laddr); err != nil {
 		return err
 	}
-	go o.hListener(o.server)
+	o.hListener(o.server)
 	return nil
 }
 
@@ -71,8 +71,8 @@ func (o *Server) hServer(conn net.Conn) {
 	recv(o.crypt, conn, o.onData, nil)
 
 	// 断线
-	if o.onClose != nil {
-		o.onClose(conn)
+	if o.onClientClose != nil {
+		o.onClientClose(conn)
 	}
 
 	// 从客户端列表移除
@@ -82,17 +82,21 @@ func (o *Server) hServer(conn net.Conn) {
 }
 
 // SendToAll 向所有客户端发送数据
-func (o *Server) SendToAll(cmd uint32, x []byte) {
+func (o *Server) SendToAll(cmd uint32, data []byte) {
 	o.lock.Lock()
 	defer o.lock.Unlock()
 	for _, v := range o.ClientList {
-		o.Send(v.Conn, cmd, x)
+		tmp := make([]byte, len(data))
+		copy(tmp, data)
+		o.Send(v.Conn, cmd, tmp)
 	}
 }
 
 // Send 向指定客户端发送数据
 func (o *Server) Send(c net.Conn, cmd uint32, data []byte) (int, error) {
-	return send(o.crypt, c, cmd, data)
+	tmp := make([]byte, len(data))
+	copy(tmp, data)
+	return send(o.crypt, c, cmd, tmp)
 }
 
 // Close 关闭服务器

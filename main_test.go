@@ -52,13 +52,18 @@ func Test(t *testing.T) {
 			wg.Done()
 		},
 	)
-	s.StartServer("0.0.0.0:1234")
+	go func() {
+		s.StartServer("0.0.0.0:1234")
+	}()
 
 	// 创建多个client
 	for i := 1; i <= x; i++ {
 		go func(i int) {
 			var c *Client
 			c = NewClient(key,
+				func() { // 连接成功
+					// ...
+				},
 				func(cmd uint32, data []byte) { // 收到服务器数据
 					atomic.AddInt64(&nClientDataLen, int64(len(data)))
 					if len(data) == y { // 收到最后一条数据后断开
