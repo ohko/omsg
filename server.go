@@ -8,11 +8,11 @@ import (
 
 // Server 服务器
 type Server struct {
-	server      net.Listener           // 用于服务器
-	onData      func(net.Conn, []byte) // 数据回调
-	onNewClient func(net.Conn)         // 新客户端回调
-	onClose     func(net.Conn)         // 客户端断开回调
-	ClientList  map[net.Conn]*SClient  // 客户端列表
+	server      net.Listener                   // 用于服务器
+	onData      func(net.Conn, uint32, []byte) // 数据回调
+	onNewClient func(net.Conn)                 // 新客户端回调
+	onClose     func(net.Conn)                 // 客户端断开回调
+	ClientList  map[net.Conn]*SClient          // 客户端列表
 	lock        sync.Mutex
 	crypt       *crypt
 }
@@ -24,12 +24,15 @@ type SClient struct {
 }
 
 // NewServer 创建
-func NewServer(key []byte, onData func(net.Conn, []byte), onNewClient func(net.Conn), onClose func(net.Conn)) *Server {
-	return &Server{
+func NewServer(key []byte, onData func(net.Conn, uint32, []byte), onNewClient func(net.Conn), onClose func(net.Conn)) *Server {
+	o := &Server{
 		onData: onData, onNewClient: onNewClient, onClose: onClose,
 		ClientList: make(map[net.Conn]*SClient),
-		crypt:      newCrypt(key),
 	}
+	if key != nil {
+		o.crypt = newCrypt(key)
+	}
+	return o
 }
 
 // StartServer 启动服务
@@ -79,17 +82,17 @@ func (o *Server) hServer(conn net.Conn) {
 }
 
 // SendToAll 向所有客户端发送数据
-func (o *Server) SendToAll(x []byte) {
+func (o *Server) SendToAll(cmd uint32, x []byte) {
 	o.lock.Lock()
 	defer o.lock.Unlock()
 	for _, v := range o.ClientList {
-		o.Send(v.Conn, x)
+		o.Send(v.Conn, cmd, x)
 	}
 }
 
 // Send 向指定客户端发送数据
-func (o *Server) Send(c net.Conn, data []byte) (int, error) {
-	return send(o.crypt, c, data)
+func (o *Server) Send(c net.Conn, cmd uint32, data []byte) (int, error) {
+	return send(o.crypt, c, cmd, data)
 }
 
 // Close 关闭服务器

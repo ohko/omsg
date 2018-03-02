@@ -6,9 +6,9 @@ import (
 	"log"
 	"net"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
 var s *Server
@@ -23,8 +23,8 @@ func Test(t *testing.T) {
 	log.SetFlags(log.Flags() | log.Lshortfile)
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	x := 1  // client数量
-	y := 10 // 每个client发送多少次数据
+	x := 100 // client数量
+	y := 100 // 每个client发送多少次数据
 	key := []byte("1234567812345678")
 	var nNeed int64
 	for i := 1; i <= x; i++ {
@@ -33,12 +33,37 @@ func Test(t *testing.T) {
 		}
 	}
 
+	var wg sync.WaitGroup
+	wg.Add(x)
+
+	// 创建服务器
+	s = NewServer(key,
+		func(conn net.Conn, cmd uint32, data []byte) { // 收到客户端数据
+			// fmt.Println(hex.Dump(data))
+			atomic.AddInt64(&nServerDataCount, 1)
+			atomic.AddInt64(&nServerDataLen, int64(len(data)))
+			s.Send(conn, 0x21436587, data)
+		},
+		func(conn net.Conn) { // 新客户端通知
+			atomic.AddInt64(&nServerClient, 1)
+		},
+		func(conn net.Conn) { // 客户端断开通知
+			atomic.AddInt64(&nServerClosed, 1)
+			wg.Done()
+		},
+	)
+	s.StartServer("0.0.0.0:1234")
+
 	// 创建多个client
 	for i := 1; i <= x; i++ {
 		go func(i int) {
-			c := NewClient(key,
-				func(data []byte) { // 收到服务器数据
+			var c *Client
+			c = NewClient(key,
+				func(cmd uint32, data []byte) { // 收到服务器数据
 					atomic.AddInt64(&nClientDataLen, int64(len(data)))
+					if len(data) == y { // 收到最后一条数据后断开
+						c.Close()
+					}
 				},
 				func() { // 服务器断开通知
 					// ...
@@ -47,52 +72,19 @@ func Test(t *testing.T) {
 					// ...
 				},
 			)
-			if err := c.Connect("0.0.0.0:1234", true, time.Second, time.Second); err != nil {
-				log.Fatalln("[C] connect error:", err)
+			if err := c.Connect("0.0.0.0:1234"); err != nil {
+				log.Fatalln(i, "[C] connect error:", err)
 			}
-			go func() { // client多线程并发数据
-				for j := 1; j <= y; j++ {
-					dd := bytes.Repeat([]byte("."), j)
-					c.Send(dd)
-				}
-				for {
-					time.Sleep(time.Second)
-					if nClientDataLen == nNeed {
-						break
-					}
-				}
-				c.Close()
-			}()
+			// 发数据
+			for j := 1; j <= y; j++ {
+				dd := bytes.Repeat([]byte("."), j)
+				c.Send(0x78563412, dd)
+			}
 		}(i)
 	}
 
-	// 创建服务器
-	s = NewServer(key,
-		func(conn net.Conn, data []byte) { // 收到客户端数据
-			// fmt.Println(hex.Dump(data))
-			atomic.AddInt64(&nServerDataCount, 1)
-			atomic.AddInt64(&nServerDataLen, int64(len(data)))
-			s.Send(conn, data)
-		},
-		func(conn net.Conn) { // 新客户端通知
-			atomic.AddInt64(&nServerClient, 1)
-		},
-		func(conn net.Conn) { // 客户端断开通知
-			atomic.AddInt64(&nServerClosed, 1)
-		},
-	)
-	s.StartServer("0.0.0.0:1234")
-
-	for {
-		time.Sleep(time.Second)
-		if nServerDataLen == nClientDataLen {
-			break
-		}
-		fmt.Println(".")
-	}
-
 	// 等待客户端断开
-	time.Sleep(time.Second * 2)
+	wg.Wait()
 
 	fmt.Println("预想数据:", nNeed)
 	fmt.Println("客户端发送:", nClientDataLen)

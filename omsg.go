@@ -8,34 +8,37 @@ import (
 
 type head struct {
 	Sign        uint16 // 2数据标志
-	Cmd         uint8  // 1指令
 	CRC         uint16 // 2简单crc校验值
 	SizeOrigin  uint32 // 4原始数据大小
 	SizeEncrypt uint32 // 4加密后数据大小
+	Cmd         uint32 // 4指令
 }
 
 var headSize = binary.Size(head{})
 
 const (
-	sign     = 0x4B48 // HK
-	cmdLogin = iota   // 登陆
-	cmdData           // 数据
+	sign = 0x4B48 // HK
 )
 
-func send(c *crypt, conn net.Conn, data []byte) (int, error) {
+func send(c *crypt, conn net.Conn, cmd uint32, data []byte) (int, error) {
 	// head
-	h := head{Sign: sign, Cmd: cmdData, CRC: 0, SizeOrigin: uint32(len(data))}
-	if h.SizeOrigin%16 != 0 {
-		h.SizeEncrypt = h.SizeOrigin + 16 - (h.SizeOrigin % 16)
-	}
+	h := head{Sign: sign, CRC: 0, SizeOrigin: uint32(len(data)), Cmd: cmd}
+	if c != nil { // encrypt
+		if h.SizeOrigin%16 != 0 {
+			h.SizeEncrypt = h.SizeOrigin + 16 - (h.SizeOrigin % 16)
+		} else {
+			h.SizeEncrypt = h.SizeOrigin
+		}
 
-	// fix data length
-	if h.SizeOrigin != h.SizeEncrypt {
-		data = append(data, bytes.Repeat([]byte{0}, int(h.SizeEncrypt-h.SizeOrigin))...)
-	}
+		// fix data length
+		if h.SizeOrigin != h.SizeEncrypt {
+			data = append(data, bytes.Repeat([]byte{0}, int(h.SizeEncrypt-h.SizeOrigin))...)
+		}
 
-	// encrypt
-	c.Encrypt(data)
+		c.Encrypt(data)
+	} else {
+		h.SizeEncrypt = h.SizeOrigin
+	}
 
 	// crc
 	h.CRC = crc(data)
@@ -45,10 +48,13 @@ func send(c *crypt, conn net.Conn, data []byte) (int, error) {
 	if n, err := conn.Write(hbs.Bytes()); err != nil {
 		return n, err
 	}
-	return conn.Write(data)
+	if n, err := conn.Write(data); err != nil {
+		return n, err
+	}
+	return int(h.SizeOrigin), nil
 }
 
-func recv(c *crypt, conn net.Conn, sCallback func(net.Conn, []byte), cCallback func([]byte)) {
+func recv(c *crypt, conn net.Conn, sCallback func(net.Conn, uint32, []byte), cCallback func(uint32, []byte)) {
 	cache := new(bytes.Buffer)
 	buf := make([]byte, 0x100)
 	var recvLen int
@@ -87,11 +93,13 @@ func recv(c *crypt, conn net.Conn, sCallback func(net.Conn, []byte), cCallback f
 			// 数据回调
 			tmp := cache.Next(int(needHead.SizeEncrypt))
 			if needHead.CRC == crc(tmp) {
-				c.Decrypt(tmp)
+				if c != nil {
+					c.Decrypt(tmp)
+				}
 				if sCallback != nil {
-					sCallback(conn, tmp[:int(needHead.SizeOrigin)])
+					sCallback(conn, needHead.Cmd, tmp[:int(needHead.SizeOrigin)])
 				} else if cCallback != nil {
-					cCallback(tmp[:int(needHead.SizeOrigin)])
+					cCallback(needHead.Cmd, tmp[:int(needHead.SizeOrigin)])
 				} else {
 					cache.Next(int(needHead.SizeEncrypt))
 				}
