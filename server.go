@@ -9,9 +9,9 @@ import (
 // Server 服务器
 type Server struct {
 	server        net.Listener                              // 用于服务器
-	onData        func(c net.Conn, cmd uint32, data []byte) // 数据回调
-	onNewClient   func(c net.Conn)                          // 新客户端回调
-	onClientClose func(c net.Conn)                          // 客户端断开回调
+	OnNewClient   func(c net.Conn)                          // 新客户端回调
+	OnData        func(c net.Conn, cmd uint32, data []byte) // 数据回调
+	OnClientClose func(c net.Conn)                          // 客户端断开回调
 	ClientList    map[net.Conn]*SClient                     // 客户端列表
 	lock          sync.Mutex
 	crypt         *crypt
@@ -24,11 +24,8 @@ type SClient struct {
 }
 
 // NewServer 创建
-func NewServer(key []byte, onData func(c net.Conn, cmd uint32, data []byte), onNewClient func(c net.Conn), onClientClose func(c net.Conn)) *Server {
-	o := &Server{
-		onData: onData, onNewClient: onNewClient, onClientClose: onClientClose,
-		ClientList: make(map[net.Conn]*SClient),
-	}
+func NewServer(key []byte) *Server {
+	o := &Server{ClientList: make(map[net.Conn]*SClient)}
 	if key != nil {
 		o.crypt = newCrypt(key)
 	}
@@ -64,15 +61,15 @@ func (o *Server) hServer(conn net.Conn) {
 	o.lock.Unlock()
 
 	// 新客户端回调
-	if o.onNewClient != nil {
-		o.onNewClient(conn)
+	if o.OnNewClient != nil {
+		o.OnNewClient(conn)
 	}
 
-	recv(o.crypt, conn, o.onData, nil)
+	recv(o.crypt, conn, o.OnData, nil)
 
 	// 断线
-	if o.onClientClose != nil {
-		o.onClientClose(conn)
+	if o.OnClientClose != nil {
+		o.OnClientClose(conn)
 	}
 
 	// 从客户端列表移除

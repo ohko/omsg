@@ -3,6 +3,7 @@ package omsg
 import (
 	"bytes"
 	"encoding/binary"
+	"log"
 	"net"
 )
 
@@ -24,18 +25,8 @@ func send(c *crypt, conn net.Conn, cmd uint32, data []byte) (int, error) {
 	// head
 	h := head{Sign: sign, CRC: 0, SizeOrigin: uint32(len(data)), Cmd: cmd}
 	if c != nil { // encrypt
-		if h.SizeOrigin%16 != 0 {
-			h.SizeEncrypt = h.SizeOrigin + 16 - (h.SizeOrigin % 16)
-		} else {
-			h.SizeEncrypt = h.SizeOrigin
-		}
-
-		// fix data length
-		if h.SizeOrigin != h.SizeEncrypt {
-			data = append(data, bytes.Repeat([]byte{0}, int(h.SizeEncrypt-h.SizeOrigin))...)
-		}
-
-		c.Encrypt(data)
+		data = c.encrypt(data)
+		h.SizeEncrypt = uint32(len(data))
 	} else {
 		h.SizeEncrypt = h.SizeOrigin
 	}
@@ -94,7 +85,7 @@ func recv(c *crypt, conn net.Conn, sCallback func(net.Conn, uint32, []byte), cCa
 			tmp := cache.Next(int(needHead.SizeEncrypt))
 			if needHead.CRC == crc(tmp) {
 				if c != nil {
-					c.Decrypt(tmp)
+					tmp = c.decrypt(tmp)
 				}
 				if sCallback != nil {
 					sCallback(conn, needHead.Cmd, tmp[:int(needHead.SizeOrigin)])
@@ -103,6 +94,8 @@ func recv(c *crypt, conn net.Conn, sCallback func(net.Conn, uint32, []byte), cCa
 				} else {
 					cache.Next(int(needHead.SizeEncrypt))
 				}
+			} else {
+				log.Println("crc error")
 			}
 			needHead.SizeEncrypt = 0
 		}

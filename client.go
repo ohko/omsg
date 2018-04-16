@@ -7,24 +7,16 @@ import (
 
 // Client ...
 type Client struct {
-	client         net.Conn                      // 用户客户端
-	onConnect      func()                        // 成功连接回调
-	onData         func(cmd uint32, data []byte) // 收到命令行回调
-	onClose        func()                        // 连接断开回调
-	onReconnect    func()                        // 重连回调
-	serverAddr     string                        // 服务器地址
-	ReConnect      bool                          // 断线重连
-	ConnectTimeout time.Duration                 // 连线超时时间（秒）
-	ReConnectWait  time.Duration                 // 重连时间间隔（秒）
-	crypt          *crypt
+	client    net.Conn                      // 用户客户端
+	OnConnect func()                        // 成功连接回调
+	OnData    func(cmd uint32, data []byte) // 收到命令行回调
+	OnClose   func()                        // 连接断开回调
+	crypt     *crypt
 }
 
 // NewClient 创建客户端
-func NewClient(key []byte, onConnect func(), onData func(cmd uint32, data []byte), onClose func(), onReconnect func()) *Client {
-	o := &Client{onConnect: onConnect, onData: onData, onClose: onClose}
-	o.ReConnect = false
-	o.ConnectTimeout = time.Second
-	o.ReConnectWait = time.Second
+func NewClient(key []byte) *Client {
+	o := &Client{}
 	if key != nil {
 		o.crypt = newCrypt(key)
 	}
@@ -33,26 +25,25 @@ func NewClient(key []byte, onConnect func(), onData func(cmd uint32, data []byte
 
 // Connect 连接到服务器
 func (o *Client) Connect(address string) error {
-	o.serverAddr = address
-	return o.connect(false)
+	var err error
+	if o.client, err = net.Dial("tcp", address); err != nil {
+		return err
+	}
+	if o.OnConnect != nil {
+		o.OnConnect()
+	}
+	go o.hClient()
+	return nil
 }
 
-func (o *Client) connect(re bool) error {
-	for {
-		var err error
-		if o.client, err = net.DialTimeout("tcp", o.serverAddr, o.ConnectTimeout); err == nil {
-			if o.onConnect != nil {
-				o.onConnect()
-			}
-			break
-		}
-		if !o.ReConnect {
-			return err
-		}
-		if re && o.onReconnect != nil {
-			o.onReconnect()
-		}
-		time.Sleep(o.ReConnectWait)
+// ConnectTimeout 连接到服务器
+func (o *Client) ConnectTimeout(address string, timeout time.Duration) error {
+	var err error
+	if o.client, err = net.DialTimeout("tcp", address, timeout); err != nil {
+		return err
+	}
+	if o.OnConnect != nil {
+		o.OnConnect()
 	}
 	go o.hClient()
 	return nil
@@ -60,14 +51,11 @@ func (o *Client) connect(re bool) error {
 
 // 监听数据
 func (o *Client) hClient() {
-	recv(o.crypt, o.client, nil, o.onData)
+	recv(o.crypt, o.client, nil, o.OnData)
 
 	o.client.Close()
-	if o.ReConnect {
-		o.connect(true)
-	}
-	if o.onClose != nil {
-		o.onClose()
+	if o.OnClose != nil {
+		o.OnClose()
 	}
 }
 

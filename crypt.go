@@ -1,6 +1,7 @@
 package omsg
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"log"
@@ -8,6 +9,7 @@ import (
 
 type crypt struct {
 	c cipher.Block
+	k []byte
 }
 
 // 16, 24, or 32 bytes to select
@@ -17,18 +19,35 @@ func newCrypt(key []byte) *crypt {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	return &crypt{c: c}
+	return &crypt{c: c, k: key}
 }
 
-func (o *crypt) Encrypt(data []byte) {
-	count := len(data) / 16
-	for i := 0; i < count; i++ {
-		o.c.Encrypt(data[i*16:(i+1)*16], data[i*16:(i+1)*16])
-	}
+func (o *crypt) encrypt(data []byte) []byte {
+	out := make([]byte, len(data))
+	copy(out, data)
+	out = pkcs5Padding(out, aes.BlockSize)
+	cipher.NewCBCEncrypter(o.c, o.k[:aes.BlockSize]).CryptBlocks(out, out)
+	return out
 }
-func (o *crypt) Decrypt(data []byte) {
-	count := len(data) / 16
-	for i := 0; i < count; i++ {
-		o.c.Decrypt(data[i*16:(i+1)*16], data[i*16:(i+1)*16])
+func (o *crypt) decrypt(data []byte) []byte {
+	out := make([]byte, len(data))
+	copy(out, data)
+	cipher.NewCBCDecrypter(o.c, o.k[:aes.BlockSize]).CryptBlocks(out, out)
+	return pkcs5UnPadding(out)
+}
+
+func pkcs5Padding(ciphertext []byte, blockSize int) []byte {
+	padding := blockSize - len(ciphertext)%blockSize
+	padtext := bytes.Repeat([]byte{byte(padding)}, padding)
+	return append(ciphertext, padtext...)
+}
+
+func pkcs5UnPadding(origData []byte) []byte {
+	length := len(origData)
+	unpadding := int(origData[length-1])
+	pos := length - unpadding
+	if pos < 0 || pos >= len(origData) {
+		return origData
 	}
+	return origData[:pos]
 }
