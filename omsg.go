@@ -3,50 +3,50 @@ package omsg
 import (
 	"bytes"
 	"encoding/binary"
-	"log"
+	"fmt"
 	"net"
+	"sync"
 )
 
 type head struct {
-	Sign        uint16 // 2数据标志
-	CRC         uint16 // 2简单crc校验值
-	SizeOrigin  uint32 // 4原始数据大小
-	SizeEncrypt uint32 // 4加密后数据大小
-	Cmd         uint32 // 4指令
+	Sign    uint16 // 2数据标志 HK
+	CRC     uint16 // 2简单crc校验值
+	Counter uint32 // 4计数器
+	Size    uint32 // 4数据大小
+	Custom  uint32 // 4自定义
 }
 
+// ServerCallback 服务器端数据回调函数
+type ServerCallback func(c net.Conn, counter uint32, data []byte, custom uint32)
+
+// ClientCallback 客户端数据回调函数
+type ClientCallback func(counter uint32, data []byte, custom uint32)
+
 var headSize = binary.Size(head{})
+var sendLock sync.Mutex
 
 const (
 	sign = 0x4B48 // HK
 )
 
-func send(c *crypt, conn net.Conn, cmd uint32, data []byte) (int, error) {
-	// head
-	h := head{Sign: sign, CRC: 0, SizeOrigin: uint32(len(data)), Cmd: cmd}
-	if c != nil { // encrypt
-		data = c.encrypt(data)
-		h.SizeEncrypt = uint32(len(data))
-	} else {
-		h.SizeEncrypt = h.SizeOrigin
-	}
+func send(conn net.Conn, counter uint32, custom uint32, data []byte) (int, error) {
+	sendLock.Lock()
+	defer sendLock.Unlock()
 
-	// crc
-	h.CRC = crc(data)
+	// head
+	h := head{Sign: sign, CRC: crc(data), Counter: counter, Size: uint32(len(data)), Custom: custom}
 
 	hbs := bytes.NewBuffer(nil)
 	binary.Write(hbs, binary.LittleEndian, h)
-	if n, err := conn.Write(hbs.Bytes()); err != nil {
-		return n, err
+	if _, err := conn.Write(hbs.Bytes()); err != nil {
+		return 0, err
 	}
-	if n, err := conn.Write(data); err != nil {
-		return n, err
-	}
-	return int(h.SizeOrigin), nil
+
+	return conn.Write(data)
 }
 
-func recv(c *crypt, conn net.Conn, sCallback func(net.Conn, uint32, []byte), cCallback func(uint32, []byte)) {
-	cache := new(bytes.Buffer)
+func recv(conn net.Conn, sCallback ServerCallback, cCallback ClientCallback) {
+	cache := bytes.NewBuffer(nil)
 	buf := make([]byte, 0x100)
 	var recvLen int
 	var err error
@@ -61,43 +61,36 @@ func recv(c *crypt, conn net.Conn, sCallback func(net.Conn, uint32, []byte), cCa
 		cache.Write(buf[:recvLen])
 
 		for {
-			// 读取数据长度
-			if needHead.SizeEncrypt == 0 {
-				// 头数据长度
-				if cache.Len() < headSize {
-					break
-				}
-
-				bs := bytes.NewBuffer(cache.Next(headSize))
-				binary.Read(bs, binary.LittleEndian, needHead)
+			// 数据不足头数据长度
+			if cache.Len() <= headSize {
+				break
 			}
 
+			// 读取数据头
+			binary.Read(bytes.NewBuffer(cache.Bytes()), binary.LittleEndian, needHead)
 			if needHead.Sign != sign {
+				fmt.Println("Header err")
 				return
 			}
 
 			// 数据长度不够，继续读取
-			if int(needHead.SizeEncrypt) > cache.Len() {
+			if cache.Len() < int(needHead.Size) {
 				break
 			}
 
 			// 数据回调
-			tmp := cache.Next(int(needHead.SizeEncrypt))
+			binary.Read(cache, binary.LittleEndian, needHead)
+			tmp := make([]byte, needHead.Size)
+			cache.Read(tmp)
 			if needHead.CRC == crc(tmp) {
-				if c != nil {
-					tmp = c.decrypt(tmp)
-				}
 				if sCallback != nil {
-					sCallback(conn, needHead.Cmd, tmp[:int(needHead.SizeOrigin)])
+					go sCallback(conn, needHead.Counter, tmp, needHead.Custom)
 				} else if cCallback != nil {
-					cCallback(needHead.Cmd, tmp[:int(needHead.SizeOrigin)])
-				} else {
-					cache.Next(int(needHead.SizeEncrypt))
+					go cCallback(needHead.Counter, tmp, needHead.Custom)
 				}
 			} else {
-				log.Println("crc error")
+				fmt.Println("crc error")
 			}
-			needHead.SizeEncrypt = 0
 		}
 	}
 }
