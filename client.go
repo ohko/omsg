@@ -2,24 +2,20 @@ package omsg
 
 import (
 	"net"
-	"sync"
-	"sync/atomic"
 	"time"
 )
 
 // Client ...
 type Client struct {
-	client   net.Conn               // 用户客户端
-	counter  uint32                 // 计数器
-	OnData   ClientCallback         // 收到命令行回调
-	OnClose  func()                 // 连接断开回调
-	sync     map[uint32]chan []byte // 同步请求
-	syncLock sync.RWMutex
+	client  net.Conn       // 用户客户端
+	sync    bool           // 同步请求
+	OnData  ClientCallback // 收到命令行回调
+	OnClose func()         // 连接断开回调
 }
 
 // NewClient 创建客户端
-func NewClient() *Client {
-	o := &Client{sync: make(map[uint32]chan []byte)}
+func NewClient(sync bool) *Client {
+	o := &Client{sync: sync}
 	return o
 }
 
@@ -34,61 +30,43 @@ func (o *Client) ConnectTimeout(address string, timeout time.Duration) error {
 	if o.client, err = net.DialTimeout("tcp", address, timeout); err != nil {
 		return err
 	}
-	go o.hClient()
+	if !o.sync {
+		go o.hClient()
+	}
 	return nil
 }
 
 // 监听数据
 func (o *Client) hClient() {
-	recv(o.client, nil, o.SelfOnData)
+	for {
+		bs, err := recv(o.client)
+		if err != nil {
+			break
+		}
+		if o.OnData != nil {
+			o.OnData(bs)
+		}
+	}
 
-	o.client.Close()
+	o.Close()
 	if o.OnClose != nil {
 		o.OnClose()
 	}
 }
 
 // SendAsync 异步向服务器发送数据
-func (o *Client) SendAsync(custom uint32, data []byte) (int, error) {
-	return send(o.client, 0, custom, data)
+func (o *Client) SendAsync(data []byte) error {
+	return send(o.client, data)
 }
 
 // SendSync 同步向服务器发送数据
-func (o *Client) SendSync(custom uint32, data []byte) ([]byte, error) {
+func (o *Client) SendSync(data []byte) ([]byte, error) {
 
-	counter := atomic.AddUint32(&o.counter, 1)
-
-	if _, err := send(o.client, counter, custom, data); err != nil {
+	if err := send(o.client, data); err != nil {
 		return nil, err
 	}
 
-	o.syncLock.Lock()
-	ch := make(chan []byte)
-	o.sync[counter] = ch
-	o.syncLock.Unlock()
-
-	bs := <-ch
-
-	o.syncLock.Lock()
-	delete(o.sync, counter)
-	o.syncLock.Unlock()
-	return bs, nil
-}
-
-// SelfOnData 收到服务器数据
-func (o *Client) SelfOnData(counter uint32, data []byte, custom uint32) {
-	if counter == 0 {
-		if o.OnData != nil {
-			o.OnData(counter, data, custom)
-		}
-		return
-	}
-
-	o.syncLock.RLock()
-	defer o.syncLock.RUnlock()
-	if v, ok := o.sync[counter]; ok {
-		v <- data
-	}
+	return recv(o.client)
 }
 
 // Close 关闭链接

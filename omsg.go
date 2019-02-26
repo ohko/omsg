@@ -3,96 +3,128 @@ package omsg
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
+	"errors"
 	"net"
 	"sync"
 )
 
 type head struct {
-	Sign    uint16 // 2数据标志 HK
-	CRC     uint16 // 2简单crc校验值
-	Counter uint32 // 4计数器
-	Size    uint32 // 4数据大小
-	Custom  uint32 // 4自定义
+	Sign uint16 // 2数据标志 HK
+	CRC  uint16 // 2简单crc校验值
+	Size uint32 // 4数据大小
 }
 
 // ServerCallback 服务器端数据回调函数
-type ServerCallback func(c net.Conn, counter uint32, data []byte, custom uint32)
+type ServerCallback func(c net.Conn, data []byte)
 
 // ClientCallback 客户端数据回调函数
-type ClientCallback func(counter uint32, data []byte, custom uint32)
+type ClientCallback func(data []byte)
 
 var headSize = binary.Size(head{})
 var sendLock sync.Mutex
 
 const (
-	sign = 0x4B48 // HK
+	signWord = 0x4B48 // HK
 )
 
-func send(conn net.Conn, counter uint32, custom uint32, data []byte) (int, error) {
-	sendLock.Lock()
-	defer sendLock.Unlock()
+func send(conn net.Conn, data []byte) error {
+	buffer := bytes.NewBuffer(nil)
+	// defer func() { log.Println("send:", conn.RemoteAddr(), hex.Dump(buffer.Bytes())) }()
 
-	// head
-	h := head{Sign: sign, CRC: crc(data), Counter: counter, Size: uint32(len(data)), Custom: custom}
-
-	hbs := bytes.NewBuffer(nil)
-	binary.Write(hbs, binary.LittleEndian, h)
-	if _, err := conn.Write(hbs.Bytes()); err != nil {
-		return 0, err
+	// 标识位
+	sign := make([]byte, 2)
+	binary.LittleEndian.PutUint16(sign, signWord)
+	if _, err := conn.Write(sign); err != nil {
+		return err
 	}
+	buffer.Write(sign)
 
-	return conn.Write(data)
+	// CRC
+	icrc := make([]byte, 2)
+	binary.LittleEndian.PutUint16(icrc, crc(data))
+	if _, err := conn.Write(icrc); err != nil {
+		return err
+	}
+	buffer.Write(icrc)
+
+	// 数据长度
+	size := make([]byte, 4)
+	binary.LittleEndian.PutUint32(size, uint32(len(data)))
+	if _, err := conn.Write(size); err != nil {
+		return err
+	}
+	buffer.Write(size)
+
+	// 数据
+	if _, err := conn.Write(data); err != nil {
+		return err
+	}
+	buffer.Write(data)
+
+	return nil
 }
 
-func recv(conn net.Conn, sCallback ServerCallback, cCallback ClientCallback) {
-	cache := bytes.NewBuffer(nil)
-	buf := make([]byte, 0x100)
-	var recvLen int
-	var err error
-	needHead := new(head)
+func recv(conn net.Conn) ([]byte, error) {
+	buffer := bytes.NewBuffer(nil)
+	// defer func() { log.Println("recv:", conn.LocalAddr(), hex.Dump(buffer.Bytes())) }()
 
-	for {
-		if recvLen, err = conn.Read(buf); err != nil {
+	// 读取2字节，判断标志
+	sign, err := recvHelper(conn, 2)
+	if err != nil {
+		return nil, err
+	}
+	buffer.Write(sign)
+	if binary.LittleEndian.Uint16(sign) != signWord {
+		return nil, errors.New("sign error")
+	}
+
+	// 读取2字节，判断CRC
+	icrc, err := recvHelper(conn, 2)
+	if err != nil {
+		return nil, err
+	}
+	buffer.Write(icrc)
+
+	// 读取数据长度
+	bsize, err := recvHelper(conn, 4)
+	if err != nil {
+		return nil, err
+	}
+	buffer.Write(bsize)
+	size := binary.LittleEndian.Uint32(bsize)
+	if size <= 0 {
+		return nil, errors.New("size error")
+	}
+
+	// 3. 读取数据
+	buf, err := recvHelper(conn, int(size))
+	buffer.Write(buf)
+
+	if binary.LittleEndian.Uint16(icrc) != crc(buf) {
+		return nil, errors.New("sign error")
+	}
+	return buf, nil
+}
+
+func recvHelper(conn net.Conn, size int) ([]byte, error) {
+	buf := bytes.NewBuffer(nil)
+	tmpBuf := make([]byte, size)
+	for { // 从数据流读取足够量的数据
+		n, err := conn.Read(tmpBuf)
+		if err != nil {
+			return nil, err
+		}
+		buf.Write(tmpBuf[:n])
+
+		// 够了
+		if buf.Len() == int(size) {
 			break
 		}
 
-		// 写入缓存
-		cache.Write(buf[:recvLen])
-
-		for {
-			// 数据不足头数据长度
-			if cache.Len() <= headSize {
-				break
-			}
-
-			// 读取数据头
-			binary.Read(bytes.NewBuffer(cache.Bytes()), binary.LittleEndian, needHead)
-			if needHead.Sign != sign {
-				fmt.Println("Header err")
-				return
-			}
-
-			// 数据长度不够，继续读取
-			if cache.Len() < int(needHead.Size) {
-				break
-			}
-
-			// 数据回调
-			binary.Read(cache, binary.LittleEndian, needHead)
-			tmp := make([]byte, needHead.Size)
-			cache.Read(tmp)
-			if needHead.CRC == crc(tmp) {
-				if sCallback != nil {
-					go sCallback(conn, needHead.Counter, tmp, needHead.Custom)
-				} else if cCallback != nil {
-					go cCallback(needHead.Counter, tmp, needHead.Custom)
-				}
-			} else {
-				fmt.Println("crc error")
-			}
-		}
+		// 继续读取差额数据量
+		tmpBuf = make([]byte, int(size)-buf.Len())
 	}
+	return buf.Bytes(), nil
 }
 
 func crc(data []byte) uint16 {

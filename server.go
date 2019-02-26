@@ -34,16 +34,15 @@ func (o *Server) StartServer(laddr string) error {
 	if o.server, err = net.Listen("tcp", laddr); err != nil {
 		return err
 	}
-	o.hListener(o.server)
-	return nil
+	return o.hListener(o.server)
 }
 
 // 监听端口
-func (o *Server) hListener(s net.Listener) {
+func (o *Server) hListener(s net.Listener) error {
 	for {
 		conn, err := s.Accept()
 		if err != nil {
-			break
+			return err
 		}
 		go o.hServer(conn)
 	}
@@ -61,7 +60,15 @@ func (o *Server) hServer(conn net.Conn) {
 		go o.OnNewClient(conn)
 	}
 
-	recv(conn, o.OnData, nil)
+	for {
+		bs, err := recv(conn)
+		if err != nil {
+			break
+		}
+		if o.OnData != nil {
+			o.OnData(conn, bs)
+		}
+	}
 
 	// 断线
 	if o.OnClientClose != nil {
@@ -79,15 +86,13 @@ func (o *Server) SendToAll(custom uint32, data []byte) {
 	o.lock.Lock()
 	defer o.lock.Unlock()
 	for _, v := range o.ClientList {
-		tmp := make([]byte, len(data))
-		copy(tmp, data)
-		o.Send(v.Conn, 0, custom, tmp)
+		o.Send(v.Conn, data)
 	}
 }
 
 // Send 向指定客户端发送数据
-func (o *Server) Send(c net.Conn, counter, custom uint32, data []byte) (int, error) {
-	return send(c, counter, custom, data)
+func (o *Server) Send(c net.Conn, data []byte) error {
+	return send(c, data)
 }
 
 // Close 关闭服务器
