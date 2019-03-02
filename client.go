@@ -44,13 +44,13 @@ func (o *Client) hClient() {
 			break
 		}
 		if o.OnData != nil {
-			o.OnData(bs)
+			go o.OnData(bs)
 		}
 	}
 
 	o.Close()
 	if o.OnClose != nil {
-		o.OnClose()
+		go o.OnClose()
 	}
 }
 

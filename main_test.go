@@ -35,7 +35,7 @@ func Test(t *testing.T) {
 	for i := 0; i < x; i++ {
 
 		// 异步
-		go func(i int) {
+		go func() {
 			c := NewClient(false)
 			c.OnData = func(data []byte) { // 收到服务器数据
 				atomic.AddInt64(&nClientRecvSum, int64(len(data)))
@@ -49,10 +49,10 @@ func Test(t *testing.T) {
 
 			atomic.AddInt64(&nClientSendSum, int64(y))
 			c.SendAsync(bytes.Repeat([]byte("."), y))
-		}(i)
+		}()
 
 		// 同步
-		go func(i int) {
+		go func() {
 			c := NewClient(true)
 			for {
 				if err := c.ConnectTimeout(":1234", time.Second*5); err == nil {
@@ -67,7 +67,7 @@ func Test(t *testing.T) {
 			} else {
 				log.Println(err)
 			}
-		}(i)
+		}()
 	}
 
 	go func() {

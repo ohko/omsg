@@ -66,7 +66,7 @@ func (o *Server) hServer(conn net.Conn) {
 			break
 		}
 		if o.OnData != nil {
-			o.OnData(conn, bs)
+			go o.OnData(conn, bs)
 		}
 	}
 
