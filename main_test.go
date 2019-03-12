@@ -2,102 +2,84 @@ package omsg
 
 import (
 	"bytes"
+	crand "crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
 	"log"
 	"net"
 	"runtime"
-	"sync/atomic"
 	"testing"
 	"time"
 )
 
-var nClientSendSum int64 // 客户端发送数据和
-var nClientRecvSum int64 // 客户端收到数据和
-
 func Test(t *testing.T) {
 	runtime.GOMAXPROCS(runtime.NumCPU())
+	log.SetFlags(log.Lshortfile)
 
-	x := 50
-	y := 500
+	count := 50
+	size := 1024
+	sendBuffer := make([]byte, size*count)
+	recvBuffer := make([]byte, size*count)
+	if _, err := crand.Read(sendBuffer); err != nil {
+		t.Fatal(err)
+	}
+	// log.Println("\n" + hex.Dump(sendBuffer))
+
 	done := make(chan bool)
 
-	// 创建服务器
+	// server
 	go func() {
 		s := NewServer()
-		s.OnData = func(c net.Conn, data []byte) { // 收到客户端数据
-			s.Send(c, data)
+		s.OnData = func(conn net.Conn, cmd, ext uint16, data []byte) { // 收到客户端数据
+			s.Send(conn, cmd, ext, data)
 		}
 		log.Println(s.StartServer(":1234"))
 	}()
 
-	// 创建多个client
-	for i := 0; i < x; i++ {
-
-		// 异步
-		go func() {
-			c := NewClient(false)
-			c.OnData = func(data []byte) { // 收到服务器数据
-				atomic.AddInt64(&nClientRecvSum, int64(len(data)))
-			}
-			for {
-				if err := c.ConnectTimeout(":1234", time.Second*5); err == nil {
-					break
-				}
-				time.Sleep(time.Second)
-			}
-
-			atomic.AddInt64(&nClientSendSum, int64(y))
-			c.SendAsync(bytes.Repeat([]byte("."), y))
-		}()
-
-		// 同步
-		go func() {
-			c := NewClient(true)
-			for {
-				if err := c.ConnectTimeout(":1234", time.Second*5); err == nil {
-					break
-				}
-				time.Sleep(time.Second)
-			}
-
-			atomic.AddInt64(&nClientSendSum, int64(y))
-			if data, err := c.SendSync(bytes.Repeat([]byte("."), y)); err == nil {
-				atomic.AddInt64(&nClientRecvSum, int64(len(data)))
-			} else {
-				log.Println(err)
-			}
-		}()
-	}
-
-	go func() {
-		for {
-			time.Sleep(time.Microsecond)
-			if nClientRecvSum == int64(x*2*y) {
+	// client
+	c := NewClient()
+	c.OnData = func(cmd, ext uint16, data []byte) { // 收到服务器数据
+		if cmd != 1 {
+			return
+		}
+		copy(recvBuffer[int(ext)*size:], data)
+		if int(ext) == count-1 {
+			if bytes.Compare(sendBuffer, recvBuffer) == 0 {
 				done <- true
+			} else {
+				t.Fail()
 			}
 		}
-	}()
+	}
+
+	// connect
+	for {
+		if err := c.ConnectTimeout(":1234", time.Second*5); err == nil {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+
+	// send
+	for i := 0; i < count; i++ {
+		c.Send(1, uint16(i), sendBuffer[i*size:(i+1)*size])
+	}
 
 	select {
 	case <-time.After(time.Second * 5):
-		log.Println("timeout")
+		t.Fatal("timeout")
 	case <-done:
-	}
-
-	t.Log("客户端发送:", nClientSendSum)
-	t.Log("客户端收到:", nClientRecvSum)
-	if nClientSendSum != nClientRecvSum {
-		t.Fail()
 	}
 }
 
 func Test1(t *testing.T) {
 
-	data := []byte("Hello world!")
+	data := []byte("12345678123456781234")
 	st := head{
 		Sign: signWord,
 		CRC:  crc(data),
+		Cmd:  1,
+		Ext:  2,
 		Size: uint32(len(data)),
 	}
 
