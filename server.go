@@ -1,7 +1,7 @@
 package omsg
 
 import (
-	"log"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -54,8 +54,7 @@ func (o *Server) hServer(conn net.Conn) {
 
 	for {
 		cmd, ext, bs, err := recv(conn)
-		if err != nil {
-			log.Println(err)
+		if err != nil && err == io.EOF {
 			break
 		}
 		if o.OnData != nil {

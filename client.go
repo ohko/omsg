@@ -1,6 +1,7 @@
 package omsg
 
 import (
+	"io"
 	"net"
 	"time"
 )
@@ -37,7 +38,7 @@ func (o *Client) ConnectTimeout(address string, timeout time.Duration) error {
 func (o *Client) hClient() {
 	for {
 		cmd, ext, bs, err := recv(o.client)
-		if err != nil {
+		if err != nil && err == io.EOF {
 			break
 		}
 		if o.OnData != nil {
