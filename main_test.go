@@ -30,7 +30,7 @@ func Test(t *testing.T) {
 	// server
 	go func() {
 		s := NewServer()
-		s.OnData = func(conn net.Conn, cmd, ext uint16, data []byte) { // 收到客户端数据
+		s.OnData = func(conn net.Conn, cmd, ext uint16, data []byte, err error) { // 收到客户端数据
 			s.Send(conn, cmd, ext, data)
 		}
 		log.Println(s.StartServer(":1234"))
@@ -38,7 +38,7 @@ func Test(t *testing.T) {
 
 	// client
 	c := NewClient()
-	c.OnData = func(cmd, ext uint16, data []byte) { // 收到服务器数据
+	c.OnData = func(cmd, ext uint16, data []byte, err error) { // 收到服务器数据
 		if cmd != 1 {
 			return
 		}

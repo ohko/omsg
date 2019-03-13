@@ -9,11 +9,11 @@ import (
 
 // Server 服务器
 type Server struct {
-	server        net.Listener                                      // 用于服务器
-	OnNewClient   func(conn net.Conn)                               // 新客户端回调
-	OnData        func(conn net.Conn, cmd, ext uint16, data []byte) // 数据回调
-	OnClientClose func(conn net.Conn)                               // 客户端断开回调
-	clientList    sync.Map                                          // 客户端列表
+	server        net.Listener                                                 // 用于服务器
+	OnNewClient   func(conn net.Conn)                                          // 新客户端回调
+	OnData        func(conn net.Conn, cmd, ext uint16, data []byte, err error) // 数据回调
+	OnClientClose func(conn net.Conn)                                          // 客户端断开回调
+	clientList    sync.Map                                                     // 客户端列表
 }
 
 // NewServer 创建
@@ -58,7 +58,7 @@ func (o *Server) hServer(conn net.Conn) {
 			break
 		}
 		if o.OnData != nil {
-			o.OnData(conn, cmd, ext, bs)
+			o.OnData(conn, cmd, ext, bs, err)
 		}
 	}
 
