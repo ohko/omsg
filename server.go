@@ -61,8 +61,8 @@ func (o *Server) hServer(conn net.Conn) {
 
 	for {
 		cmd, ext, bs, err := recv(conn)
-		switch err.(interface{}).(type) {
-		case DataError, *DataError, nil:
+		switch err.(type) {
+		case *DataError, nil:
 			if o.OnData != nil {
 				o.OnData(conn, cmd, ext, bs, err)
 			}
