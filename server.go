@@ -1,7 +1,6 @@
 package omsg
 
 import (
-	"log"
 	"net"
 	"sync"
 	"time"
@@ -64,12 +63,10 @@ func (o *Server) hServer(conn net.Conn) {
 		cmd, ext, bs, err := recv(conn)
 		switch err.(interface{}).(type) {
 		case DataError, *DataError, nil:
-			log.Println(err)
 			if o.OnData != nil {
 				o.OnData(conn, cmd, ext, bs, err)
 			}
 		default:
-			log.Println(err)
 			return
 		}
 	}
