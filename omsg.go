@@ -8,6 +8,15 @@ import (
 	"sync"
 )
 
+// DataError omsg error
+type DataError struct {
+	msg string
+}
+
+func (e *DataError) Error() string {
+	return e.msg
+}
+
 type head struct {
 	Sign uint16 // 2数据标志 HK
 	CRC  uint16 // 2简单crc校验值
