@@ -54,6 +54,7 @@ func (o *Server) hServer(conn net.Conn) {
 
 	// 从客户端列表移除
 	defer o.clientList.Delete(conn)
+	defer conn.Close()
 
 	// 断线
 	if o.OnClientClose != nil {

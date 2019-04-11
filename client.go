@@ -36,6 +36,8 @@ func (o *Client) ConnectTimeout(address string, timeout time.Duration) error {
 
 // 监听数据
 func (o *Client) hClient() {
+	defer o.Close()
+
 	for {
 		cmd, ext, bs, err := recv(o.client)
 		if err != nil {
@@ -49,7 +51,6 @@ func (o *Client) hClient() {
 		}
 	}
 
-	o.Close()
 	if o.OnClose != nil {
 		go o.OnClose()
 	}
