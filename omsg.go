@@ -84,9 +84,9 @@ func recv(conn net.Conn) (uint16, uint16, []byte, error) {
 
 func crc(data []byte) uint16 {
 	size := len(data)
-	crc := 0xFFFF
+	crc := uint16(0xFFFF)
 	for i := 0; i < size; i++ {
-		crc = (crc >> 8) ^ int(data[i])
+		crc = (crc >> 8) ^ uint16(data[i])
 		for j := 0; j < 8; j++ {
 			flag := crc & 0x0001
 			crc >>= 1
@@ -95,5 +95,5 @@ func crc(data []byte) uint16 {
 			}
 		}
 	}
-	return uint16(crc)
+	return crc
 }
