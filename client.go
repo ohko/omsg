@@ -1,16 +1,16 @@
 package omsg
 
 import (
-	"io"
 	"net"
 	"time"
 )
 
 // Client ...
 type Client struct {
-	client  net.Conn                                      // 用户客户端
-	OnData  func(cmd, ext uint16, data []byte, err error) // 收到命令行回调
-	OnClose func()                                        // 连接断开回调
+	client  net.Conn                           // 用户客户端
+	OnData  func(cmd, ext uint16, data []byte) // 收到命令行回调
+	OnError func(err error)                    // 错误回调
+	OnClose func()                             // 连接断开回调
 }
 
 // NewClient 创建客户端
@@ -38,11 +38,14 @@ func (o *Client) ConnectTimeout(address string, timeout time.Duration) error {
 func (o *Client) hClient() {
 	for {
 		cmd, ext, bs, err := recv(o.client)
-		if err != nil && err == io.EOF {
+		if err != nil {
+			if o.OnError != nil {
+				o.OnError(err)
+			}
 			break
 		}
 		if o.OnData != nil {
-			o.OnData(cmd, ext, bs, err)
+			o.OnData(cmd, ext, bs)
 		}
 	}
 
