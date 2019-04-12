@@ -49,7 +49,7 @@ func (o *Server) hServer(conn net.Conn) {
 
 	// 新客户端回调
 	if o.OnNewClient != nil {
-		go o.OnNewClient(conn)
+		o.OnNewClient(conn)
 	}
 
 	// 从客户端列表移除
@@ -57,9 +57,11 @@ func (o *Server) hServer(conn net.Conn) {
 	defer conn.Close()
 
 	// 断线
-	if o.OnClientClose != nil {
-		defer o.OnClientClose(conn)
-	}
+	defer func() {
+		if o.OnClientClose != nil {
+			o.OnClientClose(conn)
+		}
+	}()
 
 	for {
 		cmd, ext, bs, err := recv(conn)

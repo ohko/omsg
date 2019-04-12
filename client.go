@@ -52,7 +52,7 @@ func (o *Client) hClient() {
 	}
 
 	if o.OnClose != nil {
-		go o.OnClose()
+		o.OnClose()
 	}
 }
 
