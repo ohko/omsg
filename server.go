@@ -18,8 +18,7 @@ type Server struct {
 
 // NewServer 创建
 func NewServer() *Server {
-	o := new(Server)
-	return o
+	return new(Server)
 }
 
 // StartServer 启动服务
@@ -28,18 +27,17 @@ func (o *Server) StartServer(laddr string) error {
 	if o.server, err = net.Listen("tcp", laddr); err != nil {
 		return err
 	}
-	return o.hListener(o.server)
-}
 
-// 监听端口
-func (o *Server) hListener(s net.Listener) error {
+	// 监听端口
 	for {
-		conn, err := s.Accept()
+		conn, err := o.server.Accept()
 		if err != nil {
 			return err
 		}
 		go o.hServer(conn)
 	}
+
+	return nil
 }
 
 // 接收数据
@@ -52,12 +50,13 @@ func (o *Server) hServer(conn net.Conn) {
 		o.OnNewClient(conn)
 	}
 
-	// 从客户端列表移除
-	defer o.clientList.Delete(conn)
-	defer conn.Close()
-
 	// 断线
 	defer func() {
+		// 从客户端列表移除
+		o.clientList.Delete(conn)
+		conn.Close()
+
+		// 回调
 		if o.OnClientClose != nil {
 			o.OnClientClose(conn)
 		}

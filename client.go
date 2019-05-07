@@ -15,8 +15,7 @@ type Client struct {
 
 // NewClient 创建客户端
 func NewClient() *Client {
-	o := new(Client)
-	return o
+	return new(Client)
 }
 
 // Connect 连接到服务器
@@ -36,7 +35,14 @@ func (o *Client) ConnectTimeout(address string, timeout time.Duration) error {
 
 // 监听数据
 func (o *Client) hClient() {
-	defer o.Close()
+	defer func() {
+		// 回调
+		if o.OnClose != nil {
+			o.OnClose()
+		}
+
+		o.Close()
+	}()
 
 	for {
 		cmd, ext, bs, err := recv(o.client)
@@ -49,10 +55,6 @@ func (o *Client) hClient() {
 		if o.OnData != nil {
 			o.OnData(cmd, ext, bs)
 		}
-	}
-
-	if o.OnClose != nil {
-		o.OnClose()
 	}
 }
 
