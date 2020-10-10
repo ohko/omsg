@@ -24,30 +24,32 @@ type testServer struct {
 	s *Server
 }
 
-func (o *testServer) OmsgNewClient(conn net.Conn)        {}
-func (o *testServer) OmsgClientClose(conn net.Conn)      {}
-func (o *testServer) OmsgError(conn net.Conn, err error) { o.t.Fatal(err) }
-func (o *testServer) OmsgData(conn net.Conn, cmd, ext uint16, data []byte) {
+func (o *testServer) OnAccept(conn net.Conn) bool          { return true }
+func (o *testServer) OnClientClose(conn net.Conn)          {}
+func (o *testServer) OnRecvError(conn net.Conn, err error) { o.t.Fatal(err) }
+func (o *testServer) OnData(conn net.Conn, cmd, ext uint16, data []byte) error {
 	// 收到客户端数据
-	o.s.Send(conn, cmd, ext, data)
+	return o.s.Send(conn, cmd, ext, data)
 }
 
 type testClient struct {
 	t *testing.T
-	c *Client
 }
 
-func (o *testClient) OmsgClose()          {}
-func (o *testClient) OmsgError(err error) { o.t.Fatal(err) }
-func (o *testClient) OmsgData(cmd, ext uint16, data []byte) {
+func (o *testClient) OnClose()              {}
+func (o *testClient) OnRecvError(err error) { o.t.Fatal(err) }
+func (o *testClient) OnData(cmd, ext uint16, data []byte) error {
 	// 收到服务器数据
 	if cmd != 1 {
-		return
+		return nil
 	}
+
 	copy(recvBuffer[int(ext)*size:], data)
 	if int(ext) == count-1 {
 		done <- true
 	}
+
+	return nil
 }
 
 func TestServerClient(t *testing.T) {
@@ -59,27 +61,26 @@ func TestServerClient(t *testing.T) {
 	if _, err := crand.Read(sendBuffer); err != nil {
 		t.Fatal(err)
 	}
-	// log.Println("\n" + hex.Dump(sendBuffer))
 
 	// server
 	go func() {
 		ts := &testServer{t: t}
-		s := NewServer(ts, crc)
+		s, err := Listen("tcp", ":1234")
+		if err != nil {
+			log.Fatal(err)
+		}
 		ts.s = s
-		log.Println(s.StartServer(":1234"))
+		log.Println(s.Run(ts, crc))
 	}()
 
 	// client
 	tc := &testClient{t: t}
-	c := NewClient(tc, crc)
-	tc.c = c
 
 	// connect
-	for {
-		if err := c.ConnectTimeout(":1234", time.Second*5); err == nil {
-			break
-		}
-		time.Sleep(time.Second)
+	time.Sleep(time.Second)
+	c, err := Dial("tcp", ":1234", tc, crc)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	// send
