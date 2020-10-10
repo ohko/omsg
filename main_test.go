@@ -21,6 +21,7 @@ var (
 
 type testServer struct {
 	t *testing.T
+	s *Server
 }
 
 func (o *testServer) OmsgNewClient(conn net.Conn)        {}
@@ -28,11 +29,12 @@ func (o *testServer) OmsgClientClose(conn net.Conn)      {}
 func (o *testServer) OmsgError(conn net.Conn, err error) { o.t.Fatal(err) }
 func (o *testServer) OmsgData(conn net.Conn, cmd, ext uint16, data []byte) {
 	// 收到客户端数据
-	Send(conn, cmd, ext, data)
+	o.s.Send(conn, cmd, ext, data)
 }
 
 type testClient struct {
 	t *testing.T
+	c *Client
 }
 
 func (o *testClient) OmsgClose()          {}
@@ -52,6 +54,8 @@ func TestServerClient(t *testing.T) {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	log.SetFlags(log.Lshortfile)
 
+	crc := true
+
 	if _, err := crand.Read(sendBuffer); err != nil {
 		t.Fatal(err)
 	}
@@ -59,12 +63,16 @@ func TestServerClient(t *testing.T) {
 
 	// server
 	go func() {
-		s := NewServer(&testServer{t: t})
+		ts := &testServer{t: t}
+		s := NewServer(ts, crc)
+		ts.s = s
 		log.Println(s.StartServer(":1234"))
 	}()
 
 	// client
-	c := NewClient(&testClient{t: t})
+	tc := &testClient{t: t}
+	c := NewClient(tc, crc)
+	tc.c = c
 
 	// connect
 	for {
@@ -76,7 +84,7 @@ func TestServerClient(t *testing.T) {
 
 	// send
 	for i := 0; i < count; i++ {
-		Send(c.Conn, 1, uint16(i), sendBuffer[i*size:(i+1)*size])
+		c.Send(1, uint16(i), sendBuffer[i*size:(i+1)*size])
 	}
 
 	select {
